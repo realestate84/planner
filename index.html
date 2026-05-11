@@ -1192,7 +1192,7 @@ function setGcalStatus(msg, type = "") {
   if (!msg) el.className = "gcal-status";
 }
 
-async function requestFreshGoogleToken() {
+async function requestFreshGoogleToken({ silentFail = false } = {}) {
   if (gcalRenewPromise) return gcalRenewPromise;
   gcalRenewPromise = new Promise((resolve) => {
     const request = () => {
@@ -1231,12 +1231,12 @@ async function requestFreshGoogleToken() {
 
   const renewed = await gcalRenewPromise;
   if (!renewed) {
-    setSignedOutUi("다시 로그인해주세요.", { toast: true });
+    setSignedOutUi(silentFail ? "" : "다시 로그인해주세요.", { toast: !silentFail });
   }
   return renewed;
 }
 
-async function gcalFetch(url, options = {}, { retry = true } = {}) {
+async function gcalFetch(url, options = {}, { retry = true, silentRenewFailure = false } = {}) {
   const headers = {
     ...(options.headers || {}),
     Authorization: "Bearer " + gcalAccessToken
@@ -1244,7 +1244,7 @@ async function gcalFetch(url, options = {}, { retry = true } = {}) {
   let res = await fetch(url, { ...options, headers });
 
   if (res.status === 401 && retry) {
-    const renewed = await requestFreshGoogleToken();
+    const renewed = await requestFreshGoogleToken({ silentFail: silentRenewFailure });
     if (!renewed) return res;
     res = await fetch(url, {
       ...options,
@@ -1258,10 +1258,10 @@ async function gcalFetch(url, options = {}, { retry = true } = {}) {
   return res;
 }
 
-async function loadGoogleUserInfo({ sync = true, showSuccess = false } = {}) {
+async function loadGoogleUserInfo({ sync = true, showSuccess = false, silentRenewFailure = false } = {}) {
   if (!gcalAccessToken) return false;
 
-  const res = await gcalFetch("https://www.googleapis.com/oauth2/v2/userinfo");
+  const res = await gcalFetch("https://www.googleapis.com/oauth2/v2/userinfo", {}, { silentRenewFailure });
   if (res.status === 401) return false;
 
   let info = {};
@@ -1276,12 +1276,27 @@ async function loadGoogleUserInfo({ sync = true, showSuccess = false } = {}) {
   return true;
 }
 
-function restoreStoredGcalSession() {
+async function restoreStoredGcalSession() {
   const stored = getStoredGcalToken();
   if (!stored?.accessToken) return false;
-  gcalAccessToken = stored.accessToken;
-  loadGoogleUserInfo({ sync: true, showSuccess: false });
-  return true;
+
+  const fiveMinutes = 5 * 60 * 1000;
+  const hasEnoughTime = Number(stored.expiresAt || 0) - Date.now() > fiveMinutes;
+
+  if (hasEnoughTime) {
+    gcalAccessToken = stored.accessToken;
+    const restored = await loadGoogleUserInfo({ sync: true, showSuccess: false, silentRenewFailure: true });
+    if (!restored) setSignedOutUi();
+    return restored;
+  }
+
+  const renewed = await requestFreshGoogleToken({ silentFail: true });
+  if (!renewed) {
+    setSignedOutUi();
+    return false;
+  }
+
+  return loadGoogleUserInfo({ sync: true, showSuccess: false, silentRenewFailure: true });
 }
 
 function getEventDateTime(dateStamp, time, useNextDay = false) {
@@ -1655,14 +1670,17 @@ window.addEventListener("keydown", e => {
 ═══════════════════════════════════════════ */
 loadAll();
 switchDate(selectedDate);
-const restoredGcalSession = restoreStoredGcalSession();
 
 // GSI 라이브러리 비동기 로드
 if (getClientId()) {
   loadGsiScript().then(() => {
     initGsi();
-    if (!restoredGcalSession && !gcalAccessToken) tryAutoSignInOnLoad();
+    restoreStoredGcalSession().then((restored) => {
+      if (!restored && !gcalAccessToken && !getStoredGcalToken()) tryAutoSignInOnLoad();
+    });
   });
+} else {
+  restoreStoredGcalSession();
 }
 </script>
 </body>
