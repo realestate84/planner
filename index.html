@@ -286,6 +286,47 @@
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
     .toast.success { background: #2A6640; }
     .toast.error { background: #8B2020; }
+
+    /* ── SVG 드래그 입력 ── */
+    .time-tooltip {
+      position: fixed; left: 0; top: 0; transform: translate(12px, -42px);
+      padding: 7px 12px; border-radius: 999px; background: rgba(46,42,37,0.92);
+      color: white; font-size: .86rem; font-weight: 800; box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+      pointer-events: none; opacity: 0; transition: opacity .12s ease; z-index: 1200;
+      white-space: nowrap;
+    }
+    .time-tooltip.show { opacity: 1; }
+    .time-tooltip::after {
+      content: ""; position: absolute; left: 16px; bottom: -5px;
+      border-left: 5px solid transparent; border-right: 5px solid transparent;
+      border-top: 6px solid rgba(46,42,37,0.92);
+    }
+    .drag-preview-path { opacity: .5; pointer-events: none; }
+    .drag-start-marker {
+      fill: #FFFFFF; stroke: #F4A261; stroke-width: 4;
+      filter: drop-shadow(0 3px 8px rgba(80,60,30,.2)); pointer-events: none;
+    }
+
+    .drag-modal {
+      position: fixed; inset: 0; display: none; place-items: center;
+      padding: 20px; background: rgba(46,42,37,0.35); z-index: 1100;
+      backdrop-filter: blur(4px);
+    }
+    .drag-modal.show { display: grid; }
+    .drag-modal__card {
+      width: min(420px, 100%); border-radius: 28px; background: #FFFDF9;
+      border: 1.5px solid rgba(230,225,216,0.9); box-shadow: 0 24px 70px rgba(46,42,37,0.24);
+      padding: 24px;
+    }
+    .drag-modal__title { font-size: 1.2rem; font-weight: 900; margin-bottom: 14px; color: #3D342B; }
+    .drag-modal__form { display: grid; gap: 13px; }
+    .drag-modal__times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .drag-modal__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+    .modal-ok-btn, .modal-cancel-btn {
+      min-height: 44px; border-radius: 999px; font-weight: 900;
+    }
+    .modal-ok-btn { background: linear-gradient(135deg, #FFD6A5, #FDFFB6); color: #4F3B25; }
+    .modal-cancel-btn { background: #F3EEE6; color: #70665B; }
   </style>
 </head>
 <body>
@@ -418,6 +459,34 @@
 
 <!-- 토스트 -->
 <div class="toast" id="toast"></div>
+<div class="time-tooltip" id="timeTooltip">00:00</div>
+
+<!-- 드래그 일정 추가 모달 -->
+<div class="drag-modal" id="dragScheduleModal" role="dialog" aria-modal="true" aria-labelledby="dragModalTitle">
+  <div class="drag-modal__card">
+    <h2 class="drag-modal__title" id="dragModalTitle">드래그 일정 추가</h2>
+    <form class="drag-modal__form" id="dragScheduleForm">
+      <div class="drag-modal__times">
+        <div class="field">
+          <label for="dragStartInput">시작</label>
+          <input id="dragStartInput" type="time" required>
+        </div>
+        <div class="field">
+          <label for="dragEndInput">종료</label>
+          <input id="dragEndInput" type="time" required>
+        </div>
+      </div>
+      <div class="field">
+        <label for="dragTitleInput">제목</label>
+        <input id="dragTitleInput" type="text" placeholder="예: 산책, 회의, 독서" autocomplete="off" required>
+      </div>
+      <div class="drag-modal__actions">
+        <button class="modal-cancel-btn" id="dragCancelBtn" type="button">취소</button>
+        <button class="modal-ok-btn" type="submit">확인</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <script>
 /* ═══════════════════════════════════════════
@@ -426,6 +495,7 @@
 const STORAGE_KEY   = "adultPlannerSchedules_v2";
 const GCAL_KEY      = "adultPlannerGcalClientId";
 const DAY_MINUTES   = 1440;
+const CHART_GEOMETRY = { cx: 360, cy: 360, outerR: 282, innerR: 148 };
 const PASTEL_COLORS = ["#FFD6A5","#FDFFB6","#CAFFBF","#9BF6FF","#BDB2FF","#FFC6FF","#FFADAD","#A0C4FF"];
 
 const EMOJI_RULES = [
@@ -461,6 +531,12 @@ const countBadge   = document.getElementById("countBadge");
 const chartBadge   = document.getElementById("chartBadge");
 const dateInput    = document.getElementById("dateInput");
 const toastEl      = document.getElementById("toast");
+const timeTooltip  = document.getElementById("timeTooltip");
+const dragModal    = document.getElementById("dragScheduleModal");
+const dragForm     = document.getElementById("dragScheduleForm");
+const dragStartInput = document.getElementById("dragStartInput");
+const dragEndInput   = document.getElementById("dragEndInput");
+const dragTitleInput = document.getElementById("dragTitleInput");
 
 /* ═══════════════════════════════════════════
    날짜 유틸
@@ -484,6 +560,10 @@ function addDays(stamp, n) {
 function timeToMinutes(t) {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + m;
+}
+function minutesToTime(t) {
+  const n = ((Math.round(t) % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
+  return `${String(Math.floor(n / 60)).padStart(2,"0")}:${String(n % 60).padStart(2,"0")}`;
 }
 function getDuration(s, e) {
   const sm = timeToMinutes(s), em = timeToMinutes(e);
@@ -771,6 +851,196 @@ function renderList() {
 }
 
 function render() { renderChart(); renderList(); }
+
+/* ═══════════════════════════════════════════
+   SVG 드래그 일정 추가
+═══════════════════════════════════════════ */
+const dragState = {
+  pending: false,
+  active: false,
+  startMinutes: 0,
+  endMinutes: 0,
+  longPressTimer: null,
+  previewGroup: null,
+  modalDate: null
+};
+
+function getClientPoint(e) {
+  const point = e.touches?.[0] || e.changedTouches?.[0] || e;
+  return { x: point.clientX, y: point.clientY };
+}
+
+function getSvgPoint(e) {
+  const client = getClientPoint(e);
+  const svgPoint = plannerSvg.createSVGPoint();
+  svgPoint.x = client.x;
+  svgPoint.y = client.y;
+  return svgPoint.matrixTransform(plannerSvg.getScreenCTM().inverse());
+}
+
+function getAngleInfo(e) {
+  const pt = getSvgPoint(e);
+  const { cx, cy, outerR, innerR } = CHART_GEOMETRY;
+  const dx = pt.x - cx;
+  const dy = pt.y - cy;
+  const distance = Math.hypot(dx, dy);
+  const degrees = (Math.atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;
+  const minutes = Math.round((degrees / 360 * DAY_MINUTES) / 5) * 5 % DAY_MINUTES;
+  return { point: pt, minutes, time: minutesToTime(minutes), isOnRing: distance >= innerR && distance <= outerR };
+}
+
+function getRingInfo(e) {
+  const info = getAngleInfo(e);
+  if (!info.isOnRing) return null;
+  return info;
+}
+
+function showTimeTooltip(e, time) {
+  const client = getClientPoint(e);
+  timeTooltip.textContent = time;
+  timeTooltip.style.left = `${client.x}px`;
+  timeTooltip.style.top = `${client.y}px`;
+  timeTooltip.classList.add("show");
+}
+
+function hideTimeTooltip() {
+  timeTooltip.classList.remove("show");
+}
+
+function ensurePreviewGroup() {
+  if (dragState.previewGroup) dragState.previewGroup.remove();
+  dragState.previewGroup = svgEl("g", { id: "dragPreviewGroup" });
+  plannerSvg.appendChild(dragState.previewGroup);
+}
+
+function clearDragPreview() {
+  if (dragState.previewGroup) {
+    dragState.previewGroup.remove();
+    dragState.previewGroup = null;
+  }
+}
+
+function getClockwisePreviewSegments(startMin, endMin) {
+  if (startMin === endMin) return [];
+  if (endMin > startMin) return [{ start: startMin, end: endMin }];
+  return [{ start: startMin, end: DAY_MINUTES }, { start: 0, end: endMin }];
+}
+
+function drawStartMarker(startMin) {
+  if (!dragState.previewGroup) ensurePreviewGroup();
+  const midR = (CHART_GEOMETRY.outerR + CHART_GEOMETRY.innerR) / 2;
+  const pt = polar(CHART_GEOMETRY.cx, CHART_GEOMETRY.cy, midR, minToAngle(startMin));
+  dragState.previewGroup.appendChild(svgEl("circle", {
+    cx: pt.x, cy: pt.y, r: 9, class: "drag-start-marker"
+  }));
+}
+
+function drawDragPreview(endMin) {
+  const startMin = dragState.startMinutes;
+  const markerTime = startMin;
+  ensurePreviewGroup();
+  const previewColor = PASTEL_COLORS[state.schedules.length % PASTEL_COLORS.length];
+
+  getClockwisePreviewSegments(startMin, endMin).forEach(seg => {
+    dragState.previewGroup.appendChild(svgEl("path", {
+      d: arcPath(seg.start, seg.end, CHART_GEOMETRY.outerR, CHART_GEOMETRY.innerR),
+      fill: previewColor,
+      class: "drag-preview-path",
+      stroke: "#FFFFFF",
+      "stroke-width": "3",
+      "stroke-linejoin": "round"
+    }));
+  });
+  drawStartMarker(markerTime);
+}
+
+function resetDragState({ keepTooltip = false } = {}) {
+  clearTimeout(dragState.longPressTimer);
+  dragState.pending = false;
+  dragState.active = false;
+  dragState.longPressTimer = null;
+  clearDragPreview();
+  if (!keepTooltip) hideTimeTooltip();
+}
+
+function startLongPress(e) {
+  if (dragModal.classList.contains("show")) return;
+  const info = getRingInfo(e);
+  if (!info) return;
+  if (e.cancelable) e.preventDefault();
+
+  resetDragState({ keepTooltip: true });
+  dragState.pending = true;
+  dragState.startMinutes = info.minutes;
+  dragState.endMinutes = info.minutes;
+  dragState.modalDate = selectedDate;
+  showTimeTooltip(e, info.time);
+
+  dragState.longPressTimer = setTimeout(() => {
+    dragState.pending = false;
+    dragState.active = true;
+    drawStartMarker(dragState.startMinutes);
+    if (navigator.vibrate) navigator.vibrate(30);
+    showToast(`${minutesToTime(dragState.startMinutes)} 시작`, "success");
+  }, 500);
+}
+
+function moveOnRing(e) {
+  if (dragState.pending || dragState.active) {
+    if (e.cancelable) e.preventDefault();
+  }
+
+  const info = dragState.active ? getAngleInfo(e) : getRingInfo(e);
+  if (!info) {
+    if (dragState.pending) resetDragState();
+    if (!dragState.active) hideTimeTooltip();
+    return;
+  }
+
+  showTimeTooltip(e, info.time);
+
+  if (dragState.active) {
+    dragState.endMinutes = info.minutes;
+    drawDragPreview(info.minutes);
+  }
+}
+
+function finishDrag(e) {
+  if (dragState.pending) {
+    resetDragState();
+    return;
+  }
+  if (!dragState.active) {
+    hideTimeTooltip();
+    return;
+  }
+  if (e.cancelable) e.preventDefault();
+
+  const info = getAngleInfo(e);
+  if (info) dragState.endMinutes = info.minutes;
+
+  if (dragState.startMinutes === dragState.endMinutes) {
+    resetDragState();
+    showToast("종료 시간이 시작 시간과 같아 취소했어요.", "error");
+    return;
+  }
+
+  openDragModal(minutesToTime(dragState.startMinutes), minutesToTime(dragState.endMinutes));
+  hideTimeTooltip();
+}
+
+function openDragModal(start, end) {
+  dragStartInput.value = start;
+  dragEndInput.value = end;
+  dragTitleInput.value = "";
+  dragModal.classList.add("show");
+  setTimeout(() => dragTitleInput.focus(), 0);
+}
+
+function closeDragModal() {
+  dragModal.classList.remove("show");
+  resetDragState();
+}
 
 /* ═══════════════════════════════════════════
    PNG 저장
@@ -1243,6 +1513,38 @@ dateInput.addEventListener("change", e => switchDate(e.target.value));
 document.getElementById("prevDayBtn").addEventListener("click", () => switchDate(addDays(selectedDate, -1)));
 document.getElementById("nextDayBtn").addEventListener("click", () => switchDate(addDays(selectedDate, +1)));
 document.getElementById("todayBtn").addEventListener("click", () => switchDate(getTodayStamp()));
+
+plannerSvg.addEventListener("mousemove", moveOnRing);
+plannerSvg.addEventListener("mousedown", startLongPress);
+plannerSvg.addEventListener("mouseleave", () => {
+  if (dragState.pending) resetDragState();
+  if (!dragState.active) hideTimeTooltip();
+});
+window.addEventListener("mousemove", (e) => {
+  if (dragState.active) moveOnRing(e);
+});
+window.addEventListener("mouseup", finishDrag);
+plannerSvg.addEventListener("touchstart", startLongPress, { passive: false });
+plannerSvg.addEventListener("touchmove", moveOnRing, { passive: false });
+plannerSvg.addEventListener("touchend", finishDrag, { passive: false });
+plannerSvg.addEventListener("touchcancel", () => resetDragState(), { passive: false });
+
+dragForm.addEventListener("submit", e => {
+  e.preventDefault();
+  const ok = addSchedule({
+    title: dragTitleInput.value,
+    start: dragStartInput.value,
+    end: dragEndInput.value
+  });
+  if (ok) closeDragModal();
+});
+document.getElementById("dragCancelBtn").addEventListener("click", closeDragModal);
+dragModal.addEventListener("click", e => {
+  if (e.target === dragModal) closeDragModal();
+});
+window.addEventListener("keydown", e => {
+  if (e.key === "Escape" && dragModal.classList.contains("show")) closeDragModal();
+});
 
 /* ═══════════════════════════════════════════
    초기화
