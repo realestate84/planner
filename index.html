@@ -494,6 +494,7 @@
 ═══════════════════════════════════════════ */
 const STORAGE_KEY   = "adultPlannerSchedules_v2";
 const GCAL_KEY      = "adultPlannerGcalClientId";
+const GCAL_TOKEN_KEY = "adultPlannerGcalAccessToken";
 const DAY_MINUTES   = 1440;
 const CHART_GEOMETRY = { cx: 360, cy: 360, outerR: 282, innerR: 148 };
 const PASTEL_COLORS = ["#FFD6A5","#FDFFB6","#CAFFBF","#9BF6FF","#BDB2FF","#FFC6FF","#FFADAD","#A0C4FF"];
@@ -1088,15 +1089,18 @@ let gcalAccessToken = null;
 let gcalAutoSyncTimer = null;
 let gcalSyncInFlight = false;
 let suppressNextGcalError = false;
+let gcalRenewPromise = null;
 
-function setSignedOutUi(message = "") {
+function setSignedOutUi(message = "", { clearStoredToken = false, toast = false } = {}) {
   gcalAccessToken = null;
   stopGoogleAutoSync();
+  if (clearStoredToken) localStorage.removeItem(GCAL_TOKEN_KEY);
   document.getElementById("gcalSignInBtn").style.display = "flex";
   document.getElementById("gcalSignOutBtn").style.display = "none";
   document.getElementById("gcalFetchBtn").style.display = "none";
   document.getElementById("gcalUserInfo").style.display = "none";
   if (message) setGcalStatus(message, "error");
+  if (message && toast) showToast(message, "error");
 }
 
 function startGoogleAutoSync() {
@@ -1111,6 +1115,41 @@ function stopGoogleAutoSync() {
     clearInterval(gcalAutoSyncTimer);
     gcalAutoSyncTimer = null;
   }
+}
+
+function saveGcalToken(tokenResponse) {
+  gcalAccessToken = tokenResponse.access_token;
+  const expiresIn = Number(tokenResponse.expires_in || 3600);
+  localStorage.setItem(GCAL_TOKEN_KEY, JSON.stringify({
+    accessToken: gcalAccessToken,
+    savedAt: Date.now(),
+    expiresAt: Date.now() + expiresIn * 1000
+  }));
+}
+
+function getStoredGcalToken() {
+  try {
+    const raw = localStorage.getItem(GCAL_TOKEN_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "string") return { accessToken: parsed };
+    return parsed?.accessToken ? parsed : null;
+  } catch(e) {
+    return null;
+  }
+}
+
+function setSignedInUi(info = {}) {
+  const nameEl = document.getElementById("gcalUserName");
+  const photo = document.getElementById("gcalUserPhoto");
+  nameEl.textContent = info.name || info.email || "Google Calendar 연결됨";
+  if (info.picture) { photo.src = info.picture; photo.style.display = ""; }
+  else photo.style.display = "none";
+  document.getElementById("gcalUserInfo").style.display = "flex";
+  document.getElementById("gcalSignInBtn").style.display = "none";
+  document.getElementById("gcalSignOutBtn").style.display = "block";
+  document.getElementById("gcalFetchBtn").style.display = "block";
+  setGcalStatus("");
 }
 
 function getClientId() {
@@ -1153,6 +1192,98 @@ function setGcalStatus(msg, type = "") {
   if (!msg) el.className = "gcal-status";
 }
 
+async function requestFreshGoogleToken() {
+  if (gcalRenewPromise) return gcalRenewPromise;
+  gcalRenewPromise = new Promise((resolve) => {
+    const request = () => {
+      if (!gcalTokenClient) initGsi();
+      if (!gcalTokenClient) {
+        resolve(false);
+        return;
+      }
+
+      gcalTokenClient.callback = (tokenResponse = {}) => {
+        gcalTokenClient.callback = handleGcalToken;
+        if (tokenResponse.error || !tokenResponse.access_token) {
+          resolve(false);
+          return;
+        }
+        saveGcalToken(tokenResponse);
+        resolve(true);
+      };
+
+      try {
+        gcalTokenClient.requestAccessToken({ prompt: "" });
+      } catch(e) {
+        gcalTokenClient.callback = handleGcalToken;
+        resolve(false);
+      }
+    };
+
+    if (!window.google && getClientId()) {
+      loadGsiScript().then(() => { initGsi(); request(); });
+    } else {
+      request();
+    }
+  }).finally(() => {
+    gcalRenewPromise = null;
+  });
+
+  const renewed = await gcalRenewPromise;
+  if (!renewed) {
+    setSignedOutUi("다시 로그인해주세요.", { toast: true });
+  }
+  return renewed;
+}
+
+async function gcalFetch(url, options = {}, { retry = true } = {}) {
+  const headers = {
+    ...(options.headers || {}),
+    Authorization: "Bearer " + gcalAccessToken
+  };
+  let res = await fetch(url, { ...options, headers });
+
+  if (res.status === 401 && retry) {
+    const renewed = await requestFreshGoogleToken();
+    if (!renewed) return res;
+    res = await fetch(url, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        Authorization: "Bearer " + gcalAccessToken
+      }
+    });
+  }
+
+  return res;
+}
+
+async function loadGoogleUserInfo({ sync = true, showSuccess = false } = {}) {
+  if (!gcalAccessToken) return false;
+
+  const res = await gcalFetch("https://www.googleapis.com/oauth2/v2/userinfo");
+  if (res.status === 401) return false;
+
+  let info = {};
+  if (res.ok) {
+    info = await res.json();
+  }
+
+  setSignedInUi(info);
+  if (sync) syncGoogleCalendarForDate(selectedDate, { replaceGoogle: true, silent: true });
+  startGoogleAutoSync();
+  if (showSuccess) showToast("Google 로그인 완료!", "success");
+  return true;
+}
+
+function restoreStoredGcalSession() {
+  const stored = getStoredGcalToken();
+  if (!stored?.accessToken) return false;
+  gcalAccessToken = stored.accessToken;
+  loadGoogleUserInfo({ sync: true, showSuccess: false });
+  return true;
+}
+
 function getEventDateTime(dateStamp, time, useNextDay = false) {
   const date = useNextDay ? addDays(dateStamp, 1) : dateStamp;
   return `${date}T${time}:00`;
@@ -1179,17 +1310,16 @@ function getGoogleEventPayload(schedule, dateStamp) {
 }
 
 async function createGoogleCalendarEvent(schedule, dateStamp) {
-  const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+  const res = await gcalFetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
     method: "POST",
     headers: {
-      Authorization: "Bearer " + gcalAccessToken,
       "Content-Type": "application/json"
     },
     body: JSON.stringify(getGoogleEventPayload(schedule, dateStamp))
   });
 
   if (res.status === 401) {
-    setSignedOutUi("로그인이 만료되었습니다. 다시 로그인해주세요.");
+    setSignedOutUi("다시 로그인해주세요.", { toast: true });
     throw new Error("로그인이 만료되었습니다.");
   }
   if (!res.ok) {
@@ -1229,13 +1359,12 @@ async function syncManualScheduleToGoogle(schedule, dateStamp) {
 
 async function deleteGoogleCalendarEvent(eventId) {
   try {
-    const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, {
-      method: "DELETE",
-      headers: { Authorization: "Bearer " + gcalAccessToken }
+    const res = await gcalFetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+      method: "DELETE"
     });
 
     if (res.status === 401) {
-      setSignedOutUi("로그인이 만료되었습니다. 다시 로그인해주세요.");
+      setSignedOutUi("다시 로그인해주세요.", { toast: true });
       return false;
     }
     if (!res.ok && res.status !== 410) {
@@ -1278,7 +1407,7 @@ function gcalSignIn() {
   gcalTokenClient.requestAccessToken();
 }
 
-function handleGcalToken(tokenResponse) {
+function handleGcalToken(tokenResponse = {}) {
   if (tokenResponse.error) {
     if (suppressNextGcalError) {
       suppressNextGcalError = false;
@@ -1288,40 +1417,15 @@ function handleGcalToken(tokenResponse) {
     return;
   }
   suppressNextGcalError = false;
-  gcalAccessToken = tokenResponse.access_token;
-  // 사용자 정보 가져오기
-  fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-    headers: { Authorization: "Bearer " + gcalAccessToken }
-  })
-  .then(r => r.json())
-  .then(info => {
-    document.getElementById("gcalUserName").textContent = info.name || info.email;
-    const photo = document.getElementById("gcalUserPhoto");
-    if (info.picture) { photo.src = info.picture; photo.style.display = ""; }
-    else photo.style.display = "none";
-    document.getElementById("gcalUserInfo").style.display = "flex";
-    document.getElementById("gcalSignInBtn").style.display = "none";
-    document.getElementById("gcalSignOutBtn").style.display = "block";
-    document.getElementById("gcalFetchBtn").style.display = "block";
-    setGcalStatus("");
-    syncGoogleCalendarForDate(selectedDate, { replaceGoogle: true, silent: true });
-    startGoogleAutoSync();
-    showToast("Google 로그인 완료!", "success");
-  })
-  .catch(() => {
-    document.getElementById("gcalFetchBtn").style.display = "block";
-    document.getElementById("gcalSignInBtn").style.display = "none";
-    document.getElementById("gcalSignOutBtn").style.display = "block";
-    syncGoogleCalendarForDate(selectedDate, { replaceGoogle: true, silent: true });
-    startGoogleAutoSync();
-  });
+  saveGcalToken(tokenResponse);
+  loadGoogleUserInfo({ sync: true, showSuccess: true });
 }
 
 function gcalSignOut() {
   if (gcalAccessToken && window.google) {
     google.accounts.oauth2.revoke(gcalAccessToken, () => {});
   }
-  setSignedOutUi();
+  setSignedOutUi("", { clearStoredToken: true });
   setGcalStatus("");
   showToast("로그아웃 완료");
 }
@@ -1395,12 +1499,12 @@ async function syncGoogleCalendarForDate(stamp, { replaceGoogle = false, silent 
   try {
     const range = getGoogleQueryRange(stamp);
     const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(range.timeMin)}&timeMax=${encodeURIComponent(range.timeMax)}&singleEvents=true&orderBy=startTime&maxResults=50`;
-    const res = await fetch(url, { headers: { Authorization: "Bearer " + gcalAccessToken } });
+    const res = await gcalFetch(url);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       if (res.status === 401) {
-        setSignedOutUi("로그인이 만료되었습니다. 다시 로그인해주세요.");
+        setSignedOutUi("다시 로그인해주세요.", { toast: true });
         return { added: 0, skipped: 0, total: 0 };
       }
       throw new Error(err.error?.message || "API 오류");
@@ -1551,12 +1655,13 @@ window.addEventListener("keydown", e => {
 ═══════════════════════════════════════════ */
 loadAll();
 switchDate(selectedDate);
+const restoredGcalSession = restoreStoredGcalSession();
 
 // GSI 라이브러리 비동기 로드
 if (getClientId()) {
   loadGsiScript().then(() => {
     initGsi();
-    tryAutoSignInOnLoad();
+    if (!restoredGcalSession && !gcalAccessToken) tryAutoSignInOnLoad();
   });
 }
 </script>
