@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>어른이계획표</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800;900&family=Gowun+Dodum&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <style>
+    :root {
+      --bg: #FFFDF7;
+      --ink: #2E2A25;
+      --muted: #8A7F72;
+      --line: #EAE4DA;
+      --card: #FFFFFF;
+      --shadow-soft: 0 8px 32px rgba(80,60,30,0.08);
+      --shadow-card: 0 20px 52px rgba(80,60,30,0.10);
+      --pastel-1: #FFD6A5;
+      --pastel-2: #FDFFB6;
+      --pastel-3: #CAFFBF;
+      --pastel-4: #9BF6FF;
+      --pastel-5: #BDB2FF;
+      --pastel-6: #FFC6FF;
+      --pastel-7: #FFADAD;
+      --pastel-8: #A0C4FF;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Noto Sans KR", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(ellipse at 8% 12%, rgba(255,214,165,0.38) 0%, transparent 44%),
+        radial-gradient(ellipse at 92% 8%, rgba(189,178,255,0.30) 0%, transparent 40%),
+        radial-gradient(ellipse at 50% 95%, rgba(155,246,255,0.22) 0%, transparent 40%),
+        var(--bg);
+      min-height: 100vh;
+    }
+    button, input, select { font: inherit; }
+    button { border: 0; cursor: pointer; transition: transform .16s ease, filter .16s ease, box-shadow .16s ease; }
+    button:hover { transform: translateY(-2px); }
+    button:active { transform: translateY(0); }
+
+    /* ── 레이아웃 ── */
+    .app { width: min(1200px, calc(100% - 32px)); margin: 0 auto; padding: 40px 0 56px; }
+
+    /* ── 헤더 ── */
+    .hero { text-align: center; margin-bottom: 28px; }
+    .hero__badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 16px; border-radius: 999px;
+      background: rgba(255,246,226,0.9); border: 1.5px solid rgba(244,162,97,0.28);
+      color: #8B5E30; font-size: .85rem; font-weight: 700; margin-bottom: 10px;
+    }
+    .hero h1 {
+      font-family: "Gowun Dodum", "Noto Sans KR", sans-serif;
+      font-size: clamp(2.2rem, 5vw, 3.8rem);
+      letter-spacing: -0.04em; line-height: 1.1;
+    }
+    .hero__sub { margin: 10px auto 0; max-width: 600px; color: var(--muted); line-height: 1.7; font-size: .95rem; }
+
+    /* ── 날짜 네비게이션 ── */
+    .date-nav {
+      display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 24px;
+    }
+    .date-nav input[type="date"] {
+      border: 1.5px solid var(--line); border-radius: 14px; padding: 9px 14px;
+      background: white; color: var(--ink); outline: none; font-weight: 700;
+      cursor: pointer; box-shadow: var(--shadow-soft);
+    }
+    .date-nav input[type="date"]:focus { border-color: #F4BE7E; box-shadow: 0 0 0 4px rgba(255,214,165,.4); }
+    .nav-btn {
+      width: 38px; height: 38px; border-radius: 12px; background: white;
+      border: 1.5px solid var(--line) !important; color: var(--ink);
+      font-size: 1.1rem; display: flex; align-items: center; justify-content: center;
+      box-shadow: var(--shadow-soft);
+    }
+    .today-btn {
+      padding: 9px 16px; border-radius: 14px; background: white;
+      border: 1.5px solid var(--line) !important; color: var(--ink);
+      font-size: .85rem; font-weight: 700; box-shadow: var(--shadow-soft);
+    }
+
+    /* ── 2컬럼 그리드 ── */
+    .layout { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(320px,0.85fr); gap: 22px; align-items: start; }
+
+    /* ── 카드 공통 ── */
+    .card { border: 1.5px solid rgba(230,225,216,0.7); border-radius: 32px; background: rgba(255,255,255,0.92); box-shadow: var(--shadow-card); backdrop-filter: blur(12px); }
+    .chart-card { padding: clamp(16px,2.5vw,28px); }
+
+    /* ── 원형 차트 ── */
+    .chart-shell { position: relative; width: min(100%,680px); margin: 0 auto; aspect-ratio: 1; display: grid; place-items: center; }
+    #plannerSvg { width: 100%; height: 100%; display: block; overflow: visible; }
+    .chart-badge {
+      position: absolute; top: 5.5%; left: 50%; transform: translateX(-50%);
+      padding: 7px 18px; border-radius: 999px; background: rgba(255,255,255,0.92);
+      box-shadow: 0 6px 20px rgba(46,42,37,0.1); color: #7A6045;
+      font-weight: 800; font-size: .9rem; white-space: nowrap; pointer-events: none;
+      border: 1px solid rgba(244,162,97,0.2);
+    }
+
+    /* ── 패널 ── */
+    .panel { padding: 24px; }
+    .panel-section { margin-bottom: 22px; }
+    .panel-section:last-child { margin-bottom: 0; }
+    .section-title { font-size: 1rem; font-weight: 800; letter-spacing: -.03em; margin-bottom: 12px; color: #4A3F33; }
+
+    /* ── 구글 캘린더 연동 영역 ── */
+    .gcal-box {
+      border: 1.5px solid rgba(230,225,216,0.8); border-radius: 20px;
+      padding: 16px; background: linear-gradient(135deg, rgba(189,178,255,0.08), rgba(155,246,255,0.08));
+      margin-bottom: 18px;
+    }
+    .gcal-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .gcal-icon { font-size: 1.4rem; }
+    .gcal-title { font-weight: 800; font-size: .95rem; color: #3D3869; }
+    .gcal-desc { font-size: .82rem; color: var(--muted); line-height: 1.55; margin-bottom: 12px; }
+    .gcal-desc a { color: #6B5BD6; text-decoration: none; }
+    .gcal-desc a:hover { text-decoration: underline; }
+
+    .gcal-input-row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .gcal-input-row input {
+      flex: 1; border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 13px;
+      background: #FFFDF9; color: var(--ink); outline: none; font-size: .88rem;
+    }
+    .gcal-input-row input:focus { border-color: #BDB2FF; box-shadow: 0 0 0 4px rgba(189,178,255,.3); }
+    .gcal-input-row input::placeholder { color: #B0A99E; }
+
+    .gcal-btn {
+      padding: 10px 16px; border-radius: 12px; font-weight: 800; font-size: .88rem;
+      background: linear-gradient(135deg, #BDB2FF, #9B9BFF);
+      color: #2A2266; box-shadow: 0 6px 16px rgba(100,90,200,0.18);
+      white-space: nowrap;
+    }
+    .gcal-status {
+      font-size: .82rem; color: var(--muted); padding: 8px 12px;
+      border-radius: 10px; background: rgba(255,255,255,0.6); line-height: 1.4;
+      display: none;
+    }
+    .gcal-status.show { display: block; }
+    .gcal-status.error { color: #B04040; background: rgba(255,180,180,0.2); }
+    .gcal-status.success { color: #2A6640; background: rgba(180,255,200,0.2); }
+    .gcal-status.loading { color: #4A5A90; background: rgba(180,190,255,0.2); }
+
+    /* 구글 OAuth 버튼 */
+    .gcal-oauth-btn {
+      width: 100%; padding: 11px 16px; border-radius: 14px; font-weight: 800;
+      font-size: .9rem; background: white; color: #444;
+      border: 1.5px solid var(--line) !important;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+      display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;
+    }
+    .gcal-oauth-btn svg { width: 20px; height: 20px; flex-shrink: 0; }
+    .gcal-signout-btn {
+      width: 100%; padding: 8px 16px; border-radius: 12px; font-size: .82rem; font-weight: 700;
+      background: rgba(255,173,173,0.2); color: #9A3A3A; border: 1px solid rgba(255,173,173,0.4) !important;
+      display: none;
+    }
+    .gcal-user-info { display: none; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(189,178,255,0.12); border-radius: 12px; margin-bottom: 8px; }
+    .gcal-user-info img { width: 28px; height: 28px; border-radius: 50%; }
+    .gcal-user-name { font-size: .85rem; font-weight: 700; color: #3D3869; }
+    .gcal-fetch-btn {
+      width: 100%; padding: 10px; border-radius: 12px; font-weight: 800; font-size: .88rem;
+      background: linear-gradient(135deg, #CAFFBF, #9BF6FF);
+      color: #1A5040; box-shadow: 0 6px 16px rgba(50,160,100,0.14);
+      display: none;
+    }
+
+    /* ── 수동 입력 폼 ── */
+    .form { display: grid; gap: 11px; }
+    .field { display: grid; gap: 5px; }
+    .field label { font-size: .85rem; font-weight: 800; color: #675D52; }
+    .field input {
+      width: 100%; border: 1.5px solid var(--line); border-radius: 14px;
+      padding: 11px 13px; color: var(--ink); background: #FFFDF9; outline: none;
+    }
+    .field input:focus { border-color: #F4BE7E; box-shadow: 0 0 0 4px rgba(255,214,165,.4); }
+    .time-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .add-btn {
+      width: 100%; min-height: 46px; border-radius: 999px; font-weight: 800;
+      background: linear-gradient(135deg, #FFD6A5, #FDFFB6);
+      color: #4F3B25; box-shadow: 0 8px 20px rgba(200,140,60,0.18);
+    }
+
+    /* ── 액션 버튼들 ── */
+    .action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }
+    .png-btn {
+      min-height: 42px; border-radius: 999px; font-weight: 800; font-size: .88rem;
+      background: linear-gradient(135deg, #CAFFBF, #9BF6FF);
+      color: #1A5040; box-shadow: 0 6px 16px rgba(50,180,120,0.15);
+    }
+    .reset-btn {
+      min-height: 42px; border-radius: 999px; font-weight: 800; font-size: .88rem;
+      background: linear-gradient(135deg, #FFC6FF, #FFADAD);
+      color: #6B2B50; box-shadow: 0 6px 16px rgba(200,80,120,0.14);
+    }
+
+    /* ── 일정 목록 ── */
+    .list-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .list-title { font-size: .95rem; font-weight: 800; color: #4A3F33; }
+    .count-pill { padding: 4px 10px; border-radius: 999px; background: #F5EFE4; color: #7A6045; font-size: .8rem; font-weight: 800; }
+    .schedule-list { display: grid; gap: 8px; max-height: 360px; overflow-y: auto; padding-right: 2px; }
+    .schedule-list::-webkit-scrollbar { width: 4px; }
+    .schedule-list::-webkit-scrollbar-track { background: transparent; }
+    .schedule-list::-webkit-scrollbar-thumb { background: #DDD6CC; border-radius: 4px; }
+
+    .schedule-item {
+      display: grid; grid-template-columns: 40px 1fr auto;
+      align-items: center; gap: 10px; padding: 11px 12px;
+      border: 1.5px solid rgba(230,225,216,0.7); border-radius: 18px;
+      background: rgba(255,253,249,0.9); transition: box-shadow .15s;
+    }
+    .schedule-item:hover { box-shadow: 0 4px 14px rgba(80,60,30,0.08); }
+    .sched-dot {
+      width: 40px; height: 40px; border-radius: 14px; display: grid; place-items: center;
+      font-size: 1.2rem; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.06);
+    }
+    .sched-dot.gcal-source { border: 2px solid rgba(100,90,200,0.25); }
+    .sched-name { font-weight: 800; font-size: .9rem; word-break: break-word; line-height: 1.3; }
+    .sched-time { color: var(--muted); font-size: .8rem; margin-top: 2px; }
+    .gcal-tag {
+      display: inline-block; font-size: .72rem; font-weight: 700; padding: 1px 7px;
+      border-radius: 999px; background: rgba(189,178,255,0.25); color: #5048A0; margin-left: 4px;
+      vertical-align: middle;
+    }
+    .del-btn {
+      width: 32px; height: 32px; border-radius: 10px; background: #FFE8E8;
+      color: #A03030; font-size: 1rem; font-weight: 900;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .empty-state {
+      padding: 22px 16px; border: 1.5px dashed #DDD5C8; border-radius: 18px;
+      text-align: center; color: #9A9086; line-height: 1.6; font-size: .9rem;
+    }
+
+    /* ── 힌트 ── */
+    .hint { margin-top: 14px; font-size: .82rem; color: #9A8F82; line-height: 1.65; }
+
+    /* ── SVG 텍스트 스타일 ── */
+    .seg-label {
+      font-family: "Noto Sans KR", sans-serif; font-weight: 800;
+      fill: #3B342D; paint-order: stroke; stroke: rgba(255,255,255,0.88);
+      stroke-width: 4px; stroke-linejoin: round;
+      dominant-baseline: middle; text-anchor: middle; pointer-events: none;
+    }
+    .hour-label {
+      font-family: "Noto Sans KR", sans-serif;
+      fill: #66594C; font-size: 14px; font-weight: 700;
+      text-anchor: middle; dominant-baseline: middle;
+    }
+    .tick-stroke { stroke: #D0C8BD; stroke-linecap: round; }
+    .center-date {
+      font-family: "Gowun Dodum", "Noto Sans KR", sans-serif;
+      fill: #4A4034; font-weight: 700; text-anchor: middle;
+    }
+    .center-sub {
+      font-family: "Noto Sans KR", sans-serif;
+      fill: #8A7E70; font-size: 13px; font-weight: 700; text-anchor: middle;
+    }
+    .now-label {
+      font-family: "Noto Sans KR", sans-serif; font-size: 11px; font-weight: 800;
+      fill: #E04040; text-anchor: middle; dominant-baseline: middle;
+    }
+
+    /* ── 반응형 ── */
+    @media (max-width: 880px) {
+      .layout { grid-template-columns: 1fr; }
+      .app { width: min(100% - 20px, 720px); padding-top: 24px; }
+    }
+    @media (max-width: 480px) {
+      .time-row, .action-row { grid-template-columns: 1fr; }
+      .card { border-radius: 24px; }
+      .schedule-list { max-height: none; }
+      .hero h1 { font-size: 2rem; }
+    }
+
+    /* ── 토스트 알림 ── */
+    .toast {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+      padding: 12px 22px; border-radius: 999px; background: #2E2A25; color: white;
+      font-size: .9rem; font-weight: 700; box-shadow: 0 8px 28px rgba(0,0,0,0.22);
+      opacity: 0; transition: all .3s ease; pointer-events: none; z-index: 999; white-space: nowrap;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.success { background: #2A6640; }
+    .toast.error { background: #8B2020; }
+  </style>
+</head>
+<body>
+<div class="app">
+  <!-- 헤더 -->
+  <header class="hero">
+    <p class="hero__badge">🌤️ 24시간 원형 생활계획표</p>
+    <h1>어른이계획표</h1>
+    <p class="hero__sub">구글 캘린더에서 불러오거나 직접 입력해서<br>방학 계획표처럼 하루를 둥글게 펼쳐봐요.</p>
+  </header>
+
+  <!-- 날짜 네비게이션 -->
+  <div class="date-nav">
+    <button class="nav-btn" id="prevDayBtn" title="전날">◀</button>
+    <input type="date" id="dateInput">
+    <button class="today-btn" id="todayBtn">오늘</button>
+    <button class="nav-btn" id="nextDayBtn" title="다음날">▶</button>
+  </div>
+
+  <!-- 메인 레이아웃 -->
+  <div class="layout">
+    <!-- 원형 차트 -->
+    <article id="captureArea" class="card chart-card">
+      <div class="chart-shell">
+        <div class="chart-badge" id="chartBadge">오늘의 둥근 하루</div>
+        <svg id="plannerSvg" viewBox="0 0 720 720" role="img" aria-label="24시간 원형 생활계획표"></svg>
+      </div>
+    </article>
+
+    <!-- 사이드 패널 -->
+    <aside class="card panel">
+
+      <!-- 구글 캘린더 연동 -->
+      <div class="panel-section">
+        <div class="gcal-box">
+          <div class="gcal-header">
+            <span class="gcal-icon">📅</span>
+            <span class="gcal-title">Google Calendar 연동</span>
+          </div>
+
+          <!-- OAuth 방식 -->
+          <div id="gcalOAuthSection">
+            <p class="gcal-desc">
+              Google 계정으로 로그인하면 캘린더 일정을 자동으로 불러올 수 있어요.<br>
+              <a href="#" id="gcalSetupLink" onclick="showClientIdSetup(); return false;">⚙️ Client ID 설정하기</a>
+            </p>
+
+            <!-- Client ID 입력 (처음 설정 시) -->
+            <div id="clientIdSetup" style="display:none; margin-bottom:10px;">
+              <p class="gcal-desc">
+                <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a>에서
+                OAuth 2.0 Client ID를 발급받아 아래에 입력하세요.
+                (<a href="#" onclick="showClientIdHelp(); return false;">발급 방법 보기</a>)
+              </p>
+              <div class="gcal-input-row">
+                <input type="text" id="clientIdInput" placeholder="YOUR_CLIENT_ID.apps.googleusercontent.com">
+                <button class="gcal-btn" onclick="saveClientId()">저장</button>
+              </div>
+            </div>
+
+            <!-- 로그인 버튼 -->
+            <button class="gcal-oauth-btn" id="gcalSignInBtn" onclick="gcalSignIn()">
+              <svg viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
+              Google로 로그인
+            </button>
+
+            <!-- 로그인 후: 사용자 정보 + 불러오기 버튼 -->
+            <div class="gcal-user-info" id="gcalUserInfo">
+              <img id="gcalUserPhoto" src="" alt="프로필">
+              <span class="gcal-user-name" id="gcalUserName"></span>
+            </div>
+            <button class="gcal-fetch-btn" id="gcalFetchBtn" onclick="fetchGoogleCalendar()">
+              📥 이 날 일정 불러오기
+            </button>
+            <button class="gcal-signout-btn" id="gcalSignOutBtn" onclick="gcalSignOut()">
+              로그아웃
+            </button>
+          </div>
+
+          <div class="gcal-status" id="gcalStatus"></div>
+        </div>
+      </div>
+
+      <!-- 수동 입력 폼 -->
+      <div class="panel-section">
+        <p class="section-title">✏️ 수동 입력</p>
+        <form id="scheduleForm" class="form">
+          <div class="field">
+            <label for="titleInput">제목</label>
+            <input id="titleInput" type="text" placeholder="예: 아침 운동, 트레이딩, 독서" autocomplete="off" required>
+          </div>
+          <div class="time-row">
+            <div class="field">
+              <label for="startInput">시작</label>
+              <input id="startInput" type="time" required>
+            </div>
+            <div class="field">
+              <label for="endInput">종료</label>
+              <input id="endInput" type="time" required>
+            </div>
+          </div>
+          <button class="add-btn" type="submit">+ 일정 추가</button>
+        </form>
+      </div>
+
+      <!-- 저장 / 초기화 -->
+      <div class="panel-section">
+        <div class="action-row">
+          <button class="png-btn" id="savePngBtn" type="button">📸 PNG 저장</button>
+          <button class="reset-btn" id="resetBtn" type="button">🗑 초기화</button>
+        </div>
+      </div>
+
+      <!-- 일정 목록 -->
+      <div class="panel-section">
+        <div class="list-header">
+          <span class="list-title">일정 목록</span>
+          <span class="count-pill" id="countBadge">0개</span>
+        </div>
+        <div id="scheduleList" class="schedule-list" aria-live="polite"></div>
+        <p class="hint">
+          💡 자정을 넘기는 일정은 시작이 종료보다 늦으면 됩니다. (예: 수면 23:00→07:00)<br>
+          🔵 파란 테두리 아이콘은 구글 캘린더에서 불러온 일정입니다.
+        </p>
+      </div>
+
+    </aside>
+  </div>
+</div>
+
+<!-- 토스트 -->
+<div class="toast" id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════
+   상수 & 상태
+═══════════════════════════════════════════ */
+const STORAGE_KEY   = "adultPlannerSchedules_v2";
+const GCAL_KEY      = "adultPlannerGcalClientId";
+const DAY_MINUTES   = 1440;
+const PASTEL_COLORS = ["#FFD6A5","#FDFFB6","#CAFFBF","#9BF6FF","#BDB2FF","#FFC6FF","#FFADAD","#A0C4FF"];
+
+const EMOJI_RULES = [
+  { pattern: /운동|헬스|산책|조깅|수영|달리기|러닝|gym|workout/i, emoji: "🏃" },
+  { pattern: /식사|밥|점심|저녁|아침|식당|카페|커피|브런치|lunch|dinner/i, emoji: "🍽️" },
+  { pattern: /회의|미팅|업무|work|meeting|출근|퇴근|사무/i, emoji: "💼" },
+  { pattern: /공부|독서|책|스터디|학원|강의|lecture|study/i, emoji: "📚" },
+  { pattern: /트레이딩|나스닥|주식|코인|비트|선물|bybit|매매|차트/i, emoji: "📈" },
+  { pattern: /병원|의원|진료|치과|약국/i, emoji: "🏥" },
+  { pattern: /이동|여행|드라이브|차량|출장|비행/i, emoji: "🚗" },
+  { pattern: /가족|아이|육아|아빠|엄마|자녀|어머니|아버지/i, emoji: "👨‍👩‍👧‍👦" },
+  { pattern: /수면|취침|낮잠|잠|자기|sleep/i, emoji: "😴" },
+  { pattern: /씻기|샤워|목욕|청소|정리|세탁/i, emoji: "🚿" },
+  { pattern: /드라마|영화|유튜브|TV|넷플|OTT|게임|오락/i, emoji: "📺" },
+  { pattern: /자유|휴식|쉬기|여가|취미|힐링/i, emoji: "🎵" },
+  { pattern: /기도|명상|요가|묵상/i, emoji: "🧘" },
+  { pattern: /쇼핑|장보기|마트/i, emoji: "🛍️" },
+  { pattern: /친구|약속|모임|파티/i, emoji: "🎉" },
+];
+
+// 날짜별 일정 저장: { "2025-05-11": [...schedules] }
+const allData = {};
+let selectedDate = getTodayStamp();
+
+const state = { schedules: [] };  // 현재 날짜의 일정
+
+/* ═══════════════════════════════════════════
+   DOM 참조
+═══════════════════════════════════════════ */
+const plannerSvg   = document.getElementById("plannerSvg");
+const scheduleList = document.getElementById("scheduleList");
+const countBadge   = document.getElementById("countBadge");
+const chartBadge   = document.getElementById("chartBadge");
+const dateInput    = document.getElementById("dateInput");
+const toastEl      = document.getElementById("toast");
+
+/* ═══════════════════════════════════════════
+   날짜 유틸
+═══════════════════════════════════════════ */
+function getTodayStamp(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function formatDateKo(stamp) {
+  const d = new Date(stamp + "T00:00:00");
+  return new Intl.DateTimeFormat("ko-KR", { month:"long", day:"numeric", weekday:"long" }).format(d);
+}
+function addDays(stamp, n) {
+  const d = new Date(stamp + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return getTodayStamp(d);
+}
+
+/* ═══════════════════════════════════════════
+   시간 유틸
+═══════════════════════════════════════════ */
+function timeToMinutes(t) {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + m;
+}
+function getDuration(s, e) {
+  const sm = timeToMinutes(s), em = timeToMinutes(e);
+  return em > sm ? em - sm : DAY_MINUTES - sm + em;
+}
+function getSegments(s, e) {
+  const sm = timeToMinutes(s), em = timeToMinutes(e);
+  if (sm === em) return [];
+  if (em > sm) return [{ start: sm, end: em }];
+  return [{ start: sm, end: DAY_MINUTES }, { start: 0, end: em }];
+}
+function segmentsOverlap(a, b) {
+  return a.some(x => b.some(y => x.start < y.end && y.start < x.end));
+}
+function hasOverlap(cand, ignoreId = null) {
+  const cs = getSegments(cand.start, cand.end);
+  return state.schedules.some(sc => {
+    if (sc.id === ignoreId) return false;
+    return segmentsOverlap(cs, getSegments(sc.start, sc.end));
+  });
+}
+function getEmoji(title) {
+  const m = EMOJI_RULES.find(r => r.pattern.test(title));
+  return m ? m.emoji : "📌";
+}
+
+/* ═══════════════════════════════════════════
+   저장 / 불러오기
+═══════════════════════════════════════════ */
+function saveAll() {
+  allData[selectedDate] = [...state.schedules];
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(allData)); } catch(e) {}
+}
+function loadAll() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) Object.assign(allData, JSON.parse(raw));
+  } catch(e) {}
+}
+function switchDate(stamp) {
+  selectedDate = stamp;
+  dateInput.value = stamp;
+  const ko = formatDateKo(stamp);
+  chartBadge.textContent = ko;
+  state.schedules.splice(0, Infinity, ...(allData[stamp] || []));
+  render();
+}
+
+/* ═══════════════════════════════════════════
+   일정 CRUD
+═══════════════════════════════════════════ */
+function makeSchedule({ title, start, end, color, emoji, source = "manual", id }) {
+  const colorIdx = state.schedules.length % PASTEL_COLORS.length;
+  return {
+    id: id || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    title: title.trim(), start, end,
+    color: color || PASTEL_COLORS[colorIdx],
+    emoji: emoji || getEmoji(title),
+    source
+  };
+}
+function addSchedule({ title, start, end, color, emoji, source }) {
+  if (!title || !start || !end) { showToast("제목, 시작, 종료 시간을 입력해주세요.", "error"); return false; }
+  if (start === end) { showToast("시작과 종료 시간이 같을 수 없어요.", "error"); return false; }
+  if (hasOverlap({ start, end })) { showToast("다른 일정과 시간이 겹쳐요.", "error"); return false; }
+  state.schedules.push(makeSchedule({ title, start, end, color, emoji, source }));
+  sortSchedules();
+  saveAll();
+  render();
+  return true;
+}
+function deleteSchedule(id) {
+  state.schedules.splice(0, Infinity, ...state.schedules.filter(s => s.id !== id));
+  saveAll();
+  render();
+}
+function sortSchedules() {
+  state.schedules.sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+}
+function resetDay() {
+  if (!state.schedules.length) return;
+  if (!confirm("이 날의 모든 일정을 삭제할까요?")) return;
+  state.schedules.splice(0, Infinity);
+  saveAll();
+  render();
+  showToast("초기화 완료");
+}
+
+/* ═══════════════════════════════════════════
+   SVG 차트 렌더링
+═══════════════════════════════════════════ */
+function svgEl(tag, attrs) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, v));
+  return el;
+}
+function polar(cx, cy, r, deg) {
+  const rad = (deg - 90) * Math.PI / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+function minToAngle(m) { return (m / DAY_MINUTES) * 360; }
+function arcPath(sMin, eMin, outerR, innerR) {
+  const cx = 360, cy = 360;
+  const sa = minToAngle(sMin), ea = minToAngle(eMin);
+  const laf = ea - sa > 180 ? 1 : 0;
+  const os = polar(cx, cy, outerR, sa), oe = polar(cx, cy, outerR, ea);
+  const ie = polar(cx, cy, innerR, ea), is = polar(cx, cy, innerR, sa);
+  return [`M ${os.x} ${os.y}`, `A ${outerR} ${outerR} 0 ${laf} 1 ${oe.x} ${oe.y}`,
+          `L ${ie.x} ${ie.y}`, `A ${innerR} ${innerR} 0 ${laf} 0 ${is.x} ${is.y}`, "Z"].join(" ");
+}
+
+function appendLabel(g, sc, seg) {
+  const dur = seg.end - seg.start;
+  if (dur < 15) return;
+  const mid = seg.start + dur / 2;
+  const lr = dur < 60 ? 238 : 222;
+  const pt = polar(360, 360, lr, minToAngle(mid));
+  const fs = dur < 30 ? 18 : dur < 60 ? 19 : 20;
+  const text = svgEl("text", { x: pt.x, y: pt.y, class: "seg-label", "font-size": fs });
+  // 짧은 구간은 이모티콘만, 긴 구간은 이모티콘+제목
+  if (dur < 45) {
+    text.textContent = sc.emoji;
+  } else {
+    const short = sc.title.length > 7 ? sc.title.slice(0, 7) + "…" : sc.title;
+    text.textContent = `${sc.emoji} ${short}`;
+  }
+  g.appendChild(text);
+}
+
+function renderChart() {
+  plannerSvg.innerHTML = "";
+  const outerR = 282, innerR = 148, cx = 360, cy = 360;
+
+  // 기본 링 (배경)
+  plannerSvg.appendChild(svgEl("circle", {
+    cx, cy, r: (outerR + innerR) / 2, fill: "none",
+    stroke: "#EEEBE4", "stroke-width": outerR - innerR
+  }));
+
+  // 일정 아크 그룹
+  const sg = svgEl("g");
+  state.schedules.forEach((sc, i) => {
+    const color = sc.color || PASTEL_COLORS[i % PASTEL_COLORS.length];
+    const emoji = sc.emoji || getEmoji(sc.title);
+    getSegments(sc.start, sc.end).forEach(seg => {
+      sg.appendChild(svgEl("path", {
+        d: arcPath(seg.start, seg.end, outerR, innerR),
+        fill: color, stroke: "#FFFFFF", "stroke-width": "3", "stroke-linejoin": "round"
+      }));
+      appendLabel(sg, { ...sc, color, emoji }, seg);
+    });
+  });
+  plannerSvg.appendChild(sg);
+
+  // 외곽/내곽 테두리
+  [outerR, innerR].forEach(r => {
+    plannerSvg.appendChild(svgEl("circle", { cx, cy, r, fill: "none", stroke: "#DDD6CC", "stroke-width": "2" }));
+  });
+
+  // 눈금 & 시간 레이블
+  const tg = svgEl("g");
+  for (let h = 0; h < 24; h++) {
+    const ang = minToAngle(h * 60), isMaj = h % 3 === 0;
+    const s = polar(cx, cy, outerR + 7, ang);
+    const e = polar(cx, cy, outerR + (isMaj ? 23 : 14), ang);
+    const lp = polar(cx, cy, outerR + 41, ang);
+    tg.appendChild(svgEl("line", {
+      x1: s.x, y1: s.y, x2: e.x, y2: e.y,
+      class: "tick-stroke", "stroke-width": isMaj ? 3 : 1.5
+    }));
+    if (isMaj || true) { // 모든 시간 표시
+      const ht = svgEl("text", { x: lp.x, y: lp.y, class: "hour-label" });
+      ht.textContent = h;
+      tg.appendChild(ht);
+    }
+  }
+  plannerSvg.appendChild(tg);
+
+  // 현재 시간 침 (오늘 날짜만)
+  if (selectedDate === getTodayStamp()) {
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const ang = minToAngle(nowMin);
+    const outer = polar(cx, cy, outerR + 5, ang);
+    const inner = polar(cx, cy, innerR - 5, ang);
+    plannerSvg.appendChild(svgEl("line", {
+      x1: outer.x, y1: outer.y, x2: inner.x, y2: inner.y,
+      stroke: "#E04040", "stroke-width": "2.5", "stroke-linecap": "round", opacity: "0.85"
+    }));
+    plannerSvg.appendChild(svgEl("circle", { cx: outer.x, cy: outer.y, r: 5, fill: "#E04040", opacity: "0.85" }));
+  }
+
+  // 중앙 원
+  plannerSvg.appendChild(svgEl("circle", {
+    cx, cy, r: innerR - 12, fill: "#FFFDF7", stroke: "#EAE4DA", "stroke-width": "2"
+  }));
+
+  // 중앙 날짜 텍스트
+  const d = new Date(selectedDate + "T00:00:00");
+  const month = d.getMonth() + 1;
+  const day   = d.getDate();
+  const wday  = ["일","월","화","수","목","금","토"][d.getDay()];
+
+  const ct1 = svgEl("text", { x: cx, y: cy - 20, class: "center-date", "font-size": "28" });
+  ct1.textContent = `${month}월 ${day}일`;
+  plannerSvg.appendChild(ct1);
+
+  const ct2 = svgEl("text", { x: cx, y: cy + 14, class: "center-date", "font-size": "18" });
+  ct2.textContent = `${wday}요일`;
+  plannerSvg.appendChild(ct2);
+
+  if (!state.schedules.length) {
+    const ct3 = svgEl("text", { x: cx, y: cy + 44, class: "center-sub" });
+    ct3.textContent = "일정을 추가해보세요";
+    plannerSvg.appendChild(ct3);
+  } else {
+    const totalH = Math.round(state.schedules.reduce((acc, sc) => acc + getDuration(sc.start, sc.end), 0) / 60 * 10) / 10;
+    const ct3 = svgEl("text", { x: cx, y: cy + 44, class: "center-sub" });
+    ct3.textContent = `총 ${totalH}시간`;
+    plannerSvg.appendChild(ct3);
+  }
+}
+
+function renderList() {
+  countBadge.textContent = `${state.schedules.length}개`;
+  if (!state.schedules.length) {
+    scheduleList.innerHTML = '<div class="empty-state">아직 일정이 없어요. 🌱<br>구글 캘린더에서 불러오거나<br>직접 추가해보세요.</div>';
+    return;
+  }
+  scheduleList.innerHTML = "";
+  state.schedules.forEach((sc, i) => {
+    const color = sc.color || PASTEL_COLORS[i % PASTEL_COLORS.length];
+    const emoji = sc.emoji || getEmoji(sc.title);
+    const dur   = Math.round(getDuration(sc.start, sc.end) / 60 * 10) / 10;
+    const isGcal = sc.source === "google";
+
+    const item = document.createElement("div");
+    item.className = "schedule-item";
+
+    const dot = document.createElement("div");
+    dot.className = "sched-dot" + (isGcal ? " gcal-source" : "");
+    dot.style.background = color;
+    dot.textContent = emoji;
+
+    const info = document.createElement("div");
+    const nameRow = document.createElement("div");
+    nameRow.className = "sched-name";
+    nameRow.textContent = sc.title;
+    if (isGcal) {
+      const tag = document.createElement("span");
+      tag.className = "gcal-tag";
+      tag.textContent = "GCal";
+      nameRow.appendChild(tag);
+    }
+    const timeRow = document.createElement("div");
+    timeRow.className = "sched-time";
+    timeRow.textContent = `${sc.start} ~ ${sc.end}  ·  ${dur}시간`;
+    info.append(nameRow, timeRow);
+
+    const del = document.createElement("button");
+    del.className = "del-btn";
+    del.textContent = "×";
+    del.onclick = () => deleteSchedule(sc.id);
+
+    item.append(dot, info, del);
+    scheduleList.appendChild(item);
+  });
+}
+
+function render() { renderChart(); renderList(); }
+
+/* ═══════════════════════════════════════════
+   PNG 저장
+═══════════════════════════════════════════ */
+async function savePng() {
+  if (!window.html2canvas) { showToast("라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요.", "error"); return; }
+  const btn = document.getElementById("savePngBtn");
+  btn.disabled = true; btn.textContent = "저장 중...";
+  try {
+    const canvas = await html2canvas(document.getElementById("captureArea"), {
+      backgroundColor: "#FFFDF7",
+      scale: Math.min(window.devicePixelRatio || 1, 2),
+      useCORS: true
+    });
+    const a = document.createElement("a");
+    a.download = `어른이계획표_${selectedDate}.png`;
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+    showToast("PNG 저장 완료! 📸", "success");
+  } catch(e) {
+    console.error(e);
+    showToast("PNG 저장에 실패했습니다.", "error");
+  } finally {
+    btn.disabled = false; btn.textContent = "📸 PNG 저장";
+  }
+}
+
+/* ═══════════════════════════════════════════
+   토스트
+═══════════════════════════════════════════ */
+let toastTimer;
+function showToast(msg, type = "") {
+  clearTimeout(toastTimer);
+  toastEl.textContent = msg;
+  toastEl.className = `toast show ${type}`;
+  toastTimer = setTimeout(() => { toastEl.className = "toast"; }, 2800);
+}
+
+/* ═══════════════════════════════════════════
+   구글 캘린더 연동
+═══════════════════════════════════════════ */
+const GCAL_SCOPES = "https://www.googleapis.com/auth/calendar.readonly";
+let gcalTokenClient = null;
+let gcalAccessToken = null;
+
+function getClientId() {
+  return localStorage.getItem(GCAL_KEY) || "";
+}
+function saveClientId() {
+  const val = document.getElementById("clientIdInput").value.trim();
+  if (!val) { showToast("Client ID를 입력해주세요.", "error"); return; }
+  localStorage.setItem(GCAL_KEY, val);
+  document.getElementById("clientIdSetup").style.display = "none";
+  showToast("Client ID 저장 완료!", "success");
+  initGsi();
+}
+function showClientIdSetup() {
+  const el = document.getElementById("clientIdSetup");
+  el.style.display = el.style.display === "none" ? "block" : "none";
+  if (el.style.display === "block") {
+    document.getElementById("clientIdInput").value = getClientId();
+  }
+}
+function showClientIdHelp() {
+  alert(
+    "【Google Cloud Console OAuth 설정 방법】\n\n" +
+    "1. https://console.cloud.google.com 접속\n" +
+    "2. 프로젝트 생성 또는 선택\n" +
+    "3. 좌측 메뉴 → API 및 서비스 → 사용 설정된 API → Google Calendar API 사용 설정\n" +
+    "4. 사용자 인증 정보 → 사용자 인증 정보 만들기 → OAuth 클라이언트 ID\n" +
+    "5. 애플리케이션 유형: 웹 애플리케이션\n" +
+    "6. 승인된 JavaScript 출처에 이 페이지의 도메인 추가\n" +
+    "   예: http://localhost:5500  또는  https://yourdomain.github.io\n" +
+    "7. 생성된 클라이언트 ID를 복사해서 위에 붙여넣기\n\n" +
+    "※ localhost나 배포된 도메인에서만 동작합니다. (파일 직접 열기 불가)"
+  );
+}
+
+function setGcalStatus(msg, type = "") {
+  const el = document.getElementById("gcalStatus");
+  el.textContent = msg;
+  el.className = `gcal-status show ${type}`;
+  if (!msg) el.className = "gcal-status";
+}
+
+function initGsi() {
+  const clientId = getClientId();
+  if (!clientId) return;
+  if (!window.google || !window.google.accounts) return;
+  gcalTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: clientId,
+    scope: GCAL_SCOPES,
+    callback: handleGcalToken
+  });
+}
+
+function gcalSignIn() {
+  const clientId = getClientId();
+  if (!clientId) {
+    showClientIdSetup();
+    setGcalStatus("먼저 Client ID를 설정해주세요.", "error");
+    return;
+  }
+  if (!window.google) {
+    setGcalStatus("Google 라이브러리 로딩 중... 잠시 후 다시 시도해주세요.", "loading");
+    loadGsiScript().then(() => { initGsi(); gcalTokenClient.requestAccessToken(); });
+    return;
+  }
+  if (!gcalTokenClient) initGsi();
+  gcalTokenClient.requestAccessToken();
+}
+
+function handleGcalToken(tokenResponse) {
+  if (tokenResponse.error) {
+    setGcalStatus("로그인 실패: " + tokenResponse.error, "error");
+    return;
+  }
+  gcalAccessToken = tokenResponse.access_token;
+  // 사용자 정보 가져오기
+  fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+    headers: { Authorization: "Bearer " + gcalAccessToken }
+  })
+  .then(r => r.json())
+  .then(info => {
+    document.getElementById("gcalUserName").textContent = info.name || info.email;
+    const photo = document.getElementById("gcalUserPhoto");
+    if (info.picture) { photo.src = info.picture; photo.style.display = ""; }
+    else photo.style.display = "none";
+    document.getElementById("gcalUserInfo").style.display = "flex";
+    document.getElementById("gcalSignInBtn").style.display = "none";
+    document.getElementById("gcalSignOutBtn").style.display = "block";
+    document.getElementById("gcalFetchBtn").style.display = "block";
+    setGcalStatus("");
+    showToast("Google 로그인 완료!", "success");
+  })
+  .catch(() => {
+    document.getElementById("gcalFetchBtn").style.display = "block";
+    document.getElementById("gcalSignInBtn").style.display = "none";
+    document.getElementById("gcalSignOutBtn").style.display = "block";
+  });
+}
+
+function gcalSignOut() {
+  if (gcalAccessToken && window.google) {
+    google.accounts.oauth2.revoke(gcalAccessToken, () => {});
+  }
+  gcalAccessToken = null;
+  document.getElementById("gcalSignInBtn").style.display = "flex";
+  document.getElementById("gcalSignOutBtn").style.display = "none";
+  document.getElementById("gcalFetchBtn").style.display = "none";
+  document.getElementById("gcalUserInfo").style.display = "none";
+  setGcalStatus("");
+  showToast("로그아웃 완료");
+}
+
+async function fetchGoogleCalendar() {
+  if (!gcalAccessToken) { showToast("먼저 Google 로그인을 해주세요.", "error"); return; }
+
+  setGcalStatus("구글 캘린더 일정 불러오는 중...", "loading");
+  const btn = document.getElementById("gcalFetchBtn");
+  btn.disabled = true; btn.textContent = "⏳ 불러오는 중...";
+
+  try {
+    // 선택된 날짜의 00:00 ~ 23:59 (UTC 변환)
+    const dayStart = new Date(selectedDate + "T00:00:00");
+    const dayEnd   = new Date(selectedDate + "T23:59:59");
+    const tMin = dayStart.toISOString();
+    const tMax = dayEnd.toISOString();
+
+    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(tMin)}&timeMax=${encodeURIComponent(tMax)}&singleEvents=true&orderBy=startTime&maxResults=50`;
+    const res = await fetch(url, { headers: { Authorization: "Bearer " + gcalAccessToken } });
+
+    if (!res.ok) {
+      const err = await res.json();
+      if (res.status === 401) {
+        gcalAccessToken = null;
+        document.getElementById("gcalSignInBtn").style.display = "flex";
+        document.getElementById("gcalFetchBtn").style.display = "none";
+        document.getElementById("gcalSignOutBtn").style.display = "none";
+        document.getElementById("gcalUserInfo").style.display = "none";
+        setGcalStatus("로그인이 만료되었습니다. 다시 로그인해주세요.", "error");
+        return;
+      }
+      throw new Error(err.error?.message || "API 오류");
+    }
+
+    const data = await res.json();
+    const items = data.items || [];
+
+    // 시종일 이벤트는 제외, 시간이 있는 이벤트만
+    const timedEvents = items.filter(ev => ev.start && ev.start.dateTime);
+
+    if (!timedEvents.length) {
+      setGcalStatus(`${formatDateKo(selectedDate)} 일정이 없어요.`, "");
+      showToast("해당 날짜에 일정이 없어요.");
+      btn.disabled = false; btn.textContent = "📥 이 날 일정 불러오기";
+      return;
+    }
+
+    // 기존 구글 일정 제거 후 새로 추가
+    const manualOnly = state.schedules.filter(s => s.source !== "google");
+    state.schedules.splice(0, Infinity, ...manualOnly);
+
+    let added = 0, skipped = 0;
+    timedEvents.forEach(ev => {
+      const start = new Date(ev.start.dateTime);
+      const end   = new Date(ev.end.dateTime);
+      const startStr = `${String(start.getHours()).padStart(2,"0")}:${String(start.getMinutes()).padStart(2,"0")}`;
+      const endStr   = `${String(end.getHours()).padStart(2,"0")}:${String(end.getMinutes()).padStart(2,"0")}`;
+      const title = ev.summary || "제목 없음";
+      // gcal 색상 → 파스텔 매핑
+      const gcalColorMap = {
+        "1":"#FFADAD","2":"#A0C4FF","3":"#BDB2FF","4":"#9BF6FF",
+        "5":"#CAFFBF","6":"#FDFFB6","7":"#FFD6A5","8":"#FFC6FF",
+        "9":"#FFADAD","10":"#9BF6FF","11":"#BDB2FF"
+      };
+      const color = ev.colorId ? (gcalColorMap[ev.colorId] || PASTEL_COLORS[added % PASTEL_COLORS.length]) : PASTEL_COLORS[added % PASTEL_COLORS.length];
+      if (!hasOverlap({ start: startStr, end: endStr })) {
+        state.schedules.push(makeSchedule({ title, start: startStr, end: endStr, color, source: "google" }));
+        added++;
+      } else {
+        skipped++;
+      }
+    });
+
+    sortSchedules();
+    saveAll();
+    render();
+
+    const msg = skipped > 0
+      ? `${added}개 추가, ${skipped}개 겹쳐서 건너뜀`
+      : `${added}개 일정을 불러왔어요!`;
+    setGcalStatus(`✅ ${msg}`, "success");
+    showToast(`${added}개 일정 불러오기 완료!`, "success");
+
+  } catch(e) {
+    console.error(e);
+    setGcalStatus("오류: " + e.message, "error");
+    showToast("불러오기 실패: " + e.message, "error");
+  } finally {
+    btn.disabled = false; btn.textContent = "📥 이 날 일정 불러오기";
+  }
+}
+
+function loadGsiScript() {
+  return new Promise((resolve) => {
+    if (window.google) { resolve(); return; }
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.onload = resolve;
+    document.head.appendChild(s);
+  });
+}
+
+/* ═══════════════════════════════════════════
+   이벤트 바인딩
+═══════════════════════════════════════════ */
+document.getElementById("scheduleForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const ok = addSchedule({
+    title: document.getElementById("titleInput").value,
+    start: document.getElementById("startInput").value,
+    end:   document.getElementById("endInput").value
+  });
+  if (ok) {
+    document.getElementById("scheduleForm").reset();
+    document.getElementById("titleInput").focus();
+    showToast("일정이 추가되었어요!", "success");
+  }
+});
+
+document.getElementById("savePngBtn").addEventListener("click", savePng);
+document.getElementById("resetBtn").addEventListener("click", resetDay);
+
+dateInput.addEventListener("change", e => switchDate(e.target.value));
+document.getElementById("prevDayBtn").addEventListener("click", () => switchDate(addDays(selectedDate, -1)));
+document.getElementById("nextDayBtn").addEventListener("click", () => switchDate(addDays(selectedDate, +1)));
+document.getElementById("todayBtn").addEventListener("click", () => switchDate(getTodayStamp()));
+
+/* ═══════════════════════════════════════════
+   초기화
+═══════════════════════════════════════════ */
+loadAll();
+switchDate(selectedDate);
+
+// GSI 라이브러리 비동기 로드
+if (getClientId()) {
+  loadGsiScript().then(() => initGsi());
+}
+</script>
+</body>
+</html>
