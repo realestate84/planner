@@ -530,6 +530,7 @@ function switchDate(stamp) {
   chartBadge.textContent = ko;
   state.schedules.splice(0, Infinity, ...(allData[stamp] || []));
   render();
+  syncGoogleCalendarForDate(stamp, { replaceGoogle: true, silent: true });
 }
 
 /* ═══════════════════════════════════════════
@@ -814,14 +815,32 @@ function showToast(msg, type = "") {
 const GCAL_SCOPES = "https://www.googleapis.com/auth/calendar";
 let gcalTokenClient = null;
 let gcalAccessToken = null;
+let gcalAutoSyncTimer = null;
+let gcalSyncInFlight = false;
+let suppressNextGcalError = false;
 
 function setSignedOutUi(message = "") {
   gcalAccessToken = null;
+  stopGoogleAutoSync();
   document.getElementById("gcalSignInBtn").style.display = "flex";
   document.getElementById("gcalSignOutBtn").style.display = "none";
   document.getElementById("gcalFetchBtn").style.display = "none";
   document.getElementById("gcalUserInfo").style.display = "none";
   if (message) setGcalStatus(message, "error");
+}
+
+function startGoogleAutoSync() {
+  stopGoogleAutoSync();
+  gcalAutoSyncTimer = setInterval(() => {
+    syncGoogleCalendarForDate(selectedDate, { replaceGoogle: false, silent: true });
+  }, 30000);
+}
+
+function stopGoogleAutoSync() {
+  if (gcalAutoSyncTimer) {
+    clearInterval(gcalAutoSyncTimer);
+    gcalAutoSyncTimer = null;
+  }
 }
 
 function getClientId() {
@@ -991,9 +1010,14 @@ function gcalSignIn() {
 
 function handleGcalToken(tokenResponse) {
   if (tokenResponse.error) {
+    if (suppressNextGcalError) {
+      suppressNextGcalError = false;
+      return;
+    }
     setGcalStatus("로그인 실패: " + tokenResponse.error, "error");
     return;
   }
+  suppressNextGcalError = false;
   gcalAccessToken = tokenResponse.access_token;
   // 사용자 정보 가져오기
   fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
@@ -1010,12 +1034,16 @@ function handleGcalToken(tokenResponse) {
     document.getElementById("gcalSignOutBtn").style.display = "block";
     document.getElementById("gcalFetchBtn").style.display = "block";
     setGcalStatus("");
+    syncGoogleCalendarForDate(selectedDate, { replaceGoogle: true, silent: true });
+    startGoogleAutoSync();
     showToast("Google 로그인 완료!", "success");
   })
   .catch(() => {
     document.getElementById("gcalFetchBtn").style.display = "block";
     document.getElementById("gcalSignInBtn").style.display = "none";
     document.getElementById("gcalSignOutBtn").style.display = "block";
+    syncGoogleCalendarForDate(selectedDate, { replaceGoogle: true, silent: true });
+    startGoogleAutoSync();
   });
 }
 
@@ -1028,6 +1056,136 @@ function gcalSignOut() {
   showToast("로그아웃 완료");
 }
 
+function getGoogleQueryRange(stamp) {
+  return {
+    timeMin: `${stamp}T00:00:00+09:00`,
+    timeMax: `${stamp}T23:59:59+09:00`
+  };
+}
+
+function getSeoulTimeString(dateTime) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(new Date(dateTime));
+  const hour = parts.find(part => part.type === "hour")?.value || "00";
+  const minute = parts.find(part => part.type === "minute")?.value || "00";
+  return `${hour === "24" ? "00" : hour}:${minute}`;
+}
+
+function getGcalColor(colorId, fallbackIndex) {
+  const gcalColorMap = {
+    "1":"#FFADAD","2":"#A0C4FF","3":"#BDB2FF","4":"#9BF6FF",
+    "5":"#CAFFBF","6":"#FDFFB6","7":"#FFD6A5","8":"#FFC6FF",
+    "9":"#FFADAD","10":"#9BF6FF","11":"#BDB2FF"
+  };
+  return colorId ? (gcalColorMap[colorId] || PASTEL_COLORS[fallbackIndex % PASTEL_COLORS.length]) : PASTEL_COLORS[fallbackIndex % PASTEL_COLORS.length];
+}
+
+function googleEventToSchedule(ev, colorIndex) {
+  return makeSchedule({
+    id: `gcal-${ev.id}`,
+    title: ev.summary || "제목 없음",
+    start: getSeoulTimeString(ev.start.dateTime),
+    end: getSeoulTimeString(ev.end.dateTime),
+    color: getGcalColor(ev.colorId, colorIndex),
+    source: "google",
+    gcalEventId: ev.id
+  });
+}
+
+function getSchedulesForDate(stamp) {
+  return stamp === selectedDate ? [...state.schedules] : [...(allData[stamp] || [])];
+}
+
+function persistSchedulesForDate(stamp, schedules) {
+  const sorted = [...schedules].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+  allData[stamp] = sorted;
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(allData)); } catch(e) {}
+  if (stamp === selectedDate) {
+    state.schedules.splice(0, Infinity, ...sorted);
+    render();
+  }
+}
+
+function overlapsAnySchedule(candidate, schedules) {
+  const candidateSegments = getSegments(candidate.start, candidate.end);
+  return schedules.some(schedule =>
+    segmentsOverlap(candidateSegments, getSegments(schedule.start, schedule.end))
+  );
+}
+
+async function syncGoogleCalendarForDate(stamp, { replaceGoogle = false, silent = false } = {}) {
+  if (!gcalAccessToken) return { added: 0, skipped: 0, total: 0 };
+  if (gcalSyncInFlight) return { added: 0, skipped: 0, total: 0 };
+
+  gcalSyncInFlight = true;
+  try {
+    const range = getGoogleQueryRange(stamp);
+    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(range.timeMin)}&timeMax=${encodeURIComponent(range.timeMax)}&singleEvents=true&orderBy=startTime&maxResults=50`;
+    const res = await fetch(url, { headers: { Authorization: "Bearer " + gcalAccessToken } });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setSignedOutUi("로그인이 만료되었습니다. 다시 로그인해주세요.");
+        return { added: 0, skipped: 0, total: 0 };
+      }
+      throw new Error(err.error?.message || "API 오류");
+    }
+
+    const data = await res.json();
+    const timedEvents = (data.items || []).filter(ev => ev.start && ev.start.dateTime && ev.end && ev.end.dateTime);
+    let schedules = getSchedulesForDate(stamp);
+    if (replaceGoogle) {
+      schedules = schedules.filter(schedule => schedule.source !== "google");
+    }
+
+    const existingEventIds = new Set(schedules.map(schedule => schedule.gcalEventId).filter(Boolean));
+    let added = 0;
+    let skipped = 0;
+
+    timedEvents.forEach((ev) => {
+      if (existingEventIds.has(ev.id)) return;
+
+      const schedule = googleEventToSchedule(ev, added);
+      if (overlapsAnySchedule(schedule, schedules)) {
+        skipped++;
+        return;
+      }
+
+      schedules.push(schedule);
+      existingEventIds.add(ev.id);
+      added++;
+    });
+
+    if (replaceGoogle || added > 0) {
+      persistSchedulesForDate(stamp, schedules);
+    }
+
+    if (!silent) {
+      const msg = skipped > 0
+        ? `${added}개 추가, ${skipped}개 겹쳐서 건너뜀`
+        : timedEvents.length ? `${added}개 일정을 불러왔어요!` : `${formatDateKo(stamp)} 일정이 없어요.`;
+      setGcalStatus(`✅ ${msg}`, "success");
+      showToast(timedEvents.length ? `${added}개 일정 불러오기 완료!` : "해당 날짜에 일정이 없어요.", timedEvents.length ? "success" : "");
+    }
+
+    return { added, skipped, total: timedEvents.length };
+  } catch(e) {
+    console.error(e);
+    if (!silent) {
+      setGcalStatus("오류: " + e.message, "error");
+      showToast("불러오기 실패: " + e.message, "error");
+    }
+    return { added: 0, skipped: 0, total: 0 };
+  } finally {
+    gcalSyncInFlight = false;
+  }
+}
+
 async function fetchGoogleCalendar() {
   if (!gcalAccessToken) { showToast("먼저 Google 로그인을 해주세요.", "error"); return; }
 
@@ -1036,77 +1194,7 @@ async function fetchGoogleCalendar() {
   btn.disabled = true; btn.textContent = "⏳ 불러오는 중...";
 
   try {
-    // 선택된 날짜의 00:00 ~ 23:59 (UTC 변환)
-    const dayStart = new Date(selectedDate + "T00:00:00");
-    const dayEnd   = new Date(selectedDate + "T23:59:59");
-    const tMin = dayStart.toISOString();
-    const tMax = dayEnd.toISOString();
-
-    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(tMin)}&timeMax=${encodeURIComponent(tMax)}&singleEvents=true&orderBy=startTime&maxResults=50`;
-    const res = await fetch(url, { headers: { Authorization: "Bearer " + gcalAccessToken } });
-
-    if (!res.ok) {
-      const err = await res.json();
-      if (res.status === 401) {
-        setSignedOutUi("로그인이 만료되었습니다. 다시 로그인해주세요.");
-        return;
-      }
-      throw new Error(err.error?.message || "API 오류");
-    }
-
-    const data = await res.json();
-    const items = data.items || [];
-
-    // 시종일 이벤트는 제외, 시간이 있는 이벤트만
-    const timedEvents = items.filter(ev => ev.start && ev.start.dateTime);
-
-    if (!timedEvents.length) {
-      setGcalStatus(`${formatDateKo(selectedDate)} 일정이 없어요.`, "");
-      showToast("해당 날짜에 일정이 없어요.");
-      btn.disabled = false; btn.textContent = "📥 이 날 일정 불러오기";
-      return;
-    }
-
-    // 기존 구글 일정 제거 후 새로 추가
-    const manualOnly = state.schedules.filter(s => s.source !== "google");
-    state.schedules.splice(0, Infinity, ...manualOnly);
-
-    let added = 0, skipped = 0;
-    timedEvents.forEach(ev => {
-      const start = new Date(ev.start.dateTime);
-      const end   = new Date(ev.end.dateTime);
-      const startStr = `${String(start.getHours()).padStart(2,"0")}:${String(start.getMinutes()).padStart(2,"0")}`;
-      const endStr   = `${String(end.getHours()).padStart(2,"0")}:${String(end.getMinutes()).padStart(2,"0")}`;
-      const title = ev.summary || "제목 없음";
-      // gcal 색상 → 파스텔 매핑
-      const gcalColorMap = {
-        "1":"#FFADAD","2":"#A0C4FF","3":"#BDB2FF","4":"#9BF6FF",
-        "5":"#CAFFBF","6":"#FDFFB6","7":"#FFD6A5","8":"#FFC6FF",
-        "9":"#FFADAD","10":"#9BF6FF","11":"#BDB2FF"
-      };
-      const color = ev.colorId ? (gcalColorMap[ev.colorId] || PASTEL_COLORS[added % PASTEL_COLORS.length]) : PASTEL_COLORS[added % PASTEL_COLORS.length];
-      if (!hasOverlap({ start: startStr, end: endStr })) {
-        state.schedules.push(makeSchedule({ title, start: startStr, end: endStr, color, source: "google", gcalEventId: ev.id }));
-        added++;
-      } else {
-        skipped++;
-      }
-    });
-
-    sortSchedules();
-    saveAll();
-    render();
-
-    const msg = skipped > 0
-      ? `${added}개 추가, ${skipped}개 겹쳐서 건너뜀`
-      : `${added}개 일정을 불러왔어요!`;
-    setGcalStatus(`✅ ${msg}`, "success");
-    showToast(`${added}개 일정 불러오기 완료!`, "success");
-
-  } catch(e) {
-    console.error(e);
-    setGcalStatus("오류: " + e.message, "error");
-    showToast("불러오기 실패: " + e.message, "error");
+    await syncGoogleCalendarForDate(selectedDate, { replaceGoogle: true, silent: false });
   } finally {
     btn.disabled = false; btn.textContent = "📥 이 날 일정 불러오기";
   }
@@ -1120,6 +1208,16 @@ function loadGsiScript() {
     s.onload = resolve;
     document.head.appendChild(s);
   });
+}
+
+function tryAutoSignInOnLoad() {
+  if (!getClientId() || !gcalTokenClient || gcalAccessToken) return;
+  suppressNextGcalError = true;
+  try {
+    gcalTokenClient.requestAccessToken({ prompt: "" });
+  } catch(e) {
+    suppressNextGcalError = false;
+  }
 }
 
 /* ═══════════════════════════════════════════
@@ -1154,7 +1252,10 @@ switchDate(selectedDate);
 
 // GSI 라이브러리 비동기 로드
 if (getClientId()) {
-  loadGsiScript().then(() => initGsi());
+  loadGsiScript().then(() => {
+    initGsi();
+    tryAutoSignInOnLoad();
+  });
 }
 </script>
 </body>
